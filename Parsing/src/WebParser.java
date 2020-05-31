@@ -3,19 +3,20 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.*;
 
 class WebParser {
     private String source;
-    private String target;
+    private final String target = "https://ru.wikipedia.org/wiki/%D0%A4%D0%B8%D0%BB%D0%BE%D1%81%D0%BE%D1%84%D0%B8%D1%8F";
     private Document sourceHTML;
     private Document targetHTML;
     private Document internalHTML;
 
-    WebParser(String source, String target) {
+    void setSource(String source) {
         this.source = source;
-        this.target = target;
     }
 
     private HashSet<String> getLinks(String url, Document html) {
@@ -50,64 +51,83 @@ class WebParser {
         return tempPaths;
     }
 
+    HashMap<String, Integer> parseSource(int i, int j, ArrayList<String> visited, HashMap<String, Integer> knownPaths, String fileName) {
+        try (PrintWriter writer = new PrintWriter(fileName)) {
+            HashMap<String, Integer> paths = new HashMap<>();
 
-    HashMap<String, Integer> parseSource(int i, int j, ArrayList<String> visited, HashMap<String, Integer> knownPaths) {
-        HashMap<String, Integer> paths = new HashMap<>();
-
-        if (source.equals(target)) {
-            paths.put(source, i);
-
-            return paths;
-        }
-
-        i++;
-        HashSet<String> sourceLinks = getLinks(source, sourceHTML);
-
-        if (sourceLinks.contains(target)) {
-            paths.put(source, i);
-
-            return paths;
-        }
-
-        TreeMap<Integer, String> tempPaths = getCoincidence(knownPaths, sourceLinks, i);
-
-        if (!tempPaths.isEmpty()) {
-            paths.put(source, tempPaths.firstKey());
-
-            return paths;
-        }
-
-        if (!visited.contains(source)) {
-            visited.add(source);
-            i++;
-        }
-
-        for (String link : sourceLinks) {
-            HashSet<String> internalLinks = getLinks(link, internalHTML);
-            i++;
-
-            if (internalLinks.contains(target)) {
+            if (source.equals(target)) {
                 paths.put(source, i);
+                knownPaths.put(source, i);
+                writer.println(paths);
 
                 return paths;
             }
 
-            TreeMap<Integer, String> tempInternalPaths = getCoincidence(knownPaths, internalLinks, i);
+            i++;
+            HashSet<String> sourceLinks = getLinks(source, sourceHTML);
 
-            if (!tempInternalPaths.isEmpty()) {
-                paths.put(source, tempInternalPaths.firstKey());
+            if (sourceLinks.contains(target)) {
+                paths.put(source, i);
+                knownPaths.put(source, i);
+                writer.println(paths);
 
                 return paths;
             }
 
-            visited.addAll(internalLinks);
+            TreeMap<Integer, String> tempPaths = getCoincidence(knownPaths, sourceLinks, i);
+
+            if (!tempPaths.isEmpty()) {
+                paths.put(source, tempPaths.firstKey());
+                knownPaths.put(source, tempPaths.firstKey());
+                writer.println(paths);
+
+                return paths;
+            }
+
+            if (!visited.contains(source)) {
+                visited.add(source);
+                i++;
+            }
+
+            for (String link : sourceLinks) {
+                if (visited.contains(link)) {
+                    continue;
+                }
+
+                HashSet<String> internalLinks = getLinks(link, internalHTML);
+                i++;
+
+                internalLinks.removeAll(visited);
+
+                if (internalLinks.contains(target)) {
+                    paths.put(source, i);
+                    knownPaths.put(source, i);
+                    writer.println(paths);
+
+                    return paths;
+                }
+
+                TreeMap<Integer, String> tempInternalPaths = getCoincidence(knownPaths, internalLinks, i);
+
+                if (!tempInternalPaths.isEmpty()) {
+                    paths.put(source, tempInternalPaths.firstKey());
+                    knownPaths.put(source, i);
+                    writer.println(paths);
+
+                    return paths;
+                }
+
+                visited.addAll(internalLinks);
+            }
+
+            i++;
+            source = visited.get(j);
+            j++;
+        } catch (FileNotFoundException e) {
+            e.getMessage();
         }
 
-        i++;
-
-        source = visited.get(j);
-        j++;
-        return parseSource(i, j, visited, knownPaths);
+        return parseSource(i, j, visited, knownPaths, fileName);
     }
 
     HashMap<String, Integer> parseTarget() {
@@ -118,34 +138,16 @@ class WebParser {
 
         while (true) {
             for (String link : targetLinks) {
-                try {
-                    internalHTML = Jsoup.connect(link).userAgent("Chrome/83.0.4103.61").get();
-                } catch (IOException e) {
-                    e.getMessage();
+                HashSet<String> internalLinks = getLinks(link, internalHTML);
+
+                if (internalLinks.contains(target)) {
+                    paths.put(link, i);
                 }
 
-                Elements internalContent = internalHTML.select("div.mw-parser-output").select("a[href*=/wiki/]").not("[class=image]");
+                TreeMap<Integer, String> tempInternalPaths = getCoincidence(paths, internalLinks, i);
 
-                for (Element elem : internalContent) {
-                    if (!elem.text().equals("") && elem.attr("abs:href").contains("ru.wikipedia.org") && !elem.attr("class").contains("mw-magiclink-isbn")) {
-                        boolean isExist = false;
-                        if (i == 1) {
-                            if (elem.attr("abs:href").equals(target)) {
-                                isExist = true;
-                            }
-                        } else {
-                            for (String internalLink : paths.keySet()) {
-                                if (elem.attr("abs:href").equals(internalLink)) {
-                                    isExist = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (isExist) {
-                            paths.put(link, i);
-                            break;
-                        }
-                    }
+                if (!tempInternalPaths.isEmpty()) {
+                    paths.put(link, tempInternalPaths.firstKey());
                 }
             }
             int sizeBefore = targetLinks.size();
